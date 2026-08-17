@@ -76,4 +76,4 @@ render workflows tasks start flipCoin --local --input='[]'
 - Next.js starts with `next start -H 0.0.0.0` so it binds `0.0.0.0:$PORT`. Health check is `GET /health`.
 - Cron expressions are UTC. `0 6 * * *` is 06:00 UTC.
 - Do not put the Workflow in `render.yaml`.
-- This Blueprint uses `starter` so the web service does not spin down. `render blueprints validate` returns `need_payment_info` until the Render workspace has a payment method.
+- Services use the free plan. Free web services spin down after 15 minutes of inactivity. `preDeployCommand` is paid-only, so migrations run in the start command.

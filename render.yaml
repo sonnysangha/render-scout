@@ -1,6 +1,6 @@
 databases:
   - name: scout-db
-    plan: basic-256mb
+    plan: free
     region: oregon
     postgresMajorVersion: "16"
     ipAllowList: []
@@ -8,7 +8,7 @@ databases:
 services:
   - type: keyvalue
     name: scout-cache
-    plan: starter
+    plan: free
     region: oregon
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []
@@ -16,12 +16,11 @@ services:
   - type: web
     name: scout-web
     runtime: node
-    plan: starter
+    plan: free
     region: oregon
     rootDir: web
     buildCommand: npm ci && npm run build
-    startCommand: npm start
-    preDeployCommand: npm run migrate
+    startCommand: npm run migrate && npm start
     healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
@@ -46,7 +45,7 @@ services:
   - type: cron
     name: scout-cron
     runtime: node
-    plan: starter
+    plan: free
     region: oregon
     rootDir: web
     schedule: "0 6 * * *"

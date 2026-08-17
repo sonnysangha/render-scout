@@ -46,10 +46,24 @@ export async function createAudit(url: string): Promise<Audit> {
   }
 
   await getRedis().set(`audit:${audit.id}`, JSON.stringify(audit));
-  const render = new Render();
-  await render.workflows.startTask(`${workflowSlug}/startAudit`, [
-    audit.id,
-    audit.url,
-  ]);
+
+  try {
+    const render = new Render();
+    await render.workflows.startTask(`${workflowSlug}/startAudit`, [
+      audit.id,
+      audit.url,
+    ]);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "failed to start workflow task";
+    await getPool().query(
+      `UPDATE audits SET status = $2, report = $3 WHERE id = $1`,
+      [audit.id, "failed", JSON.stringify({ error: message })],
+    );
+    const failed = { ...audit, status: "failed", report: { error: message } };
+    await getRedis().set(`audit:${audit.id}`, JSON.stringify(failed));
+    return failed;
+  }
+
   return audit;
 }

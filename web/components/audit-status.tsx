@@ -56,9 +56,7 @@ export function AuditStatus({ id }: { id: string }) {
 
   const report = asRedditReport(audit.report);
   if (!report) {
-    return (
-      <pre>{JSON.stringify(audit.report, null, 2)}</pre>
-    );
+    return <pre>{JSON.stringify(audit.report, null, 2)}</pre>;
   }
 
   return <AuditReport report={report} />;

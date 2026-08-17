@@ -34,6 +34,10 @@ function CommentBlock({
 
 export function AuditReport({ report }: { report: RedditReport }) {
   const { post, sample, highlights, topComments, room } = report;
+  const listed = sample.commentsListed ?? post.numComments;
+  const complete =
+    sample.complete ??
+    (listed === 0 || sample.commentsLoaded >= listed * 0.9);
   const cards: Array<[string, CommentCard | null]> = [
     ["Most upvoted", highlights.mostUpvoted],
     ["Started the biggest reply pile", highlights.mostReplied],
@@ -59,7 +63,9 @@ export function AuditReport({ report }: { report: RedditReport }) {
           <span>{formatScore(post.numComments)} comments</span>
           <span>u/{post.author}</span>
         </p>
-        {post.selftext ? <p className="body post-body">{post.selftext}</p> : null}
+        {post.selftext ? (
+          <p className="body post-body">{post.selftext}</p>
+        ) : null}
         <a href={redditHref(post.permalink)} target="_blank" rel="noreferrer">
           Open the thread
         </a>
@@ -68,7 +74,7 @@ export function AuditReport({ report }: { report: RedditReport }) {
       <div className="stats">
         <div>
           <strong>{sample.commentsLoaded}</strong>
-          <span>of {formatScore(post.numComments)} read</span>
+          <span>of {formatScore(listed)} read</span>
         </div>
         <div>
           <strong>{sample.uniqueCommenters}</strong>
@@ -91,6 +97,12 @@ export function AuditReport({ report }: { report: RedditReport }) {
           <span>downvoted</span>
         </div>
       </div>
+
+      <p className="coverage">
+        {complete
+          ? `Read the full thread — ${sample.commentsLoaded} comments.`
+          : `Read ${sample.commentsLoaded} of ${listed} comments. Rankings use this sample, not Reddit’s collapsed view.`}
+      </p>
 
       <article className="card verdict">
         <p className="kicker">The room</p>
@@ -118,7 +130,9 @@ export function AuditReport({ report }: { report: RedditReport }) {
 
       <div className="grid">
         {cards.map(([label, comment]) =>
-          comment ? <CommentBlock key={label} label={label} comment={comment} /> : null,
+          comment ? (
+            <CommentBlock key={label} label={label} comment={comment} />
+          ) : null,
         )}
       </div>
 
@@ -131,7 +145,9 @@ export function AuditReport({ report }: { report: RedditReport }) {
                 <span className="rank">{index + 1}</span>
                 <div>
                   <p className="meta">
-                    <span className="score">▲ {formatScore(comment.score)}</span>
+                    <span className="score">
+                      ▲ {formatScore(comment.score)}
+                    </span>
                     <span>u/{comment.author}</span>
                   </p>
                   <p className="body">{comment.body}</p>

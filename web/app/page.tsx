@@ -17,7 +17,7 @@ export default async function Page({
     <main>
       <h1>Scout</h1>
       <p className="lede">
-        Paste a Reddit post. Render Workflows pulls the top of the thread, then
+        Paste a Reddit post. Render Workflows pages through the thread, then
         fans out ranking, room signal, and the comments that actually moved the
         score.
       </p>

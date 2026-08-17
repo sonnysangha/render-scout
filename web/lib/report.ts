@@ -30,6 +30,8 @@ export type RedditReport = {
   };
   sample: {
     commentsLoaded: number;
+    commentsListed?: number;
+    complete?: boolean;
     uniqueCommenters: number;
     opReplies: number;
     maxDepth: number;

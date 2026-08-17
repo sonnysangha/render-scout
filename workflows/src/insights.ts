@@ -17,6 +17,8 @@ export type RedditReport = {
   post: RedditPost;
   sample: {
     commentsLoaded: number;
+    commentsListed: number;
+    complete: boolean;
     uniqueCommenters: number;
     opReplies: number;
     maxDepth: number;
@@ -225,13 +227,18 @@ function repeatingPhrases(comments: RedditComment[]): string[] {
     .map(([phrase]) => phrase);
 }
 
-function loudest(comments: RedditComment[]): RedditReport["room"]["loudestCommenter"] {
+function loudest(
+  comments: RedditComment[],
+): RedditReport["room"]["loudestCommenter"] {
   const byAuthor = new Map<string, { comments: number; totalScore: number }>();
   for (const comment of comments) {
     if (comment.isOp) {
       continue;
     }
-    const current = byAuthor.get(comment.author) ?? { comments: 0, totalScore: 0 };
+    const current = byAuthor.get(comment.author) ?? {
+      comments: 0,
+      totalScore: 0,
+    };
     current.comments += 1;
     current.totalScore += comment.score;
     byAuthor.set(comment.author, current);
@@ -242,7 +249,8 @@ function loudest(comments: RedditComment[]): RedditReport["room"]["loudestCommen
     if (
       !winner ||
       stats.comments > winner.comments ||
-      (stats.comments === winner.comments && stats.totalScore > winner.totalScore)
+      (stats.comments === winner.comments &&
+        stats.totalScore > winner.totalScore)
     ) {
       winner = { author, ...stats };
     }
@@ -262,8 +270,16 @@ function verdict(
 
   const scores = comments.map((comment) => comment.score);
   const avg = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+  const coverage =
+    post.numComments > 0 && comments.length < post.numComments * 0.9
+      ? ` Read ${comments.length} of ${post.numComments} comments.`
+      : "";
   const heat =
-    post.numComments > 400 ? "This is a loud thread." : post.numComments > 80 ? "The room showed up." : "A smaller room.";
+    post.numComments > 400
+      ? "This is a loud thread."
+      : post.numComments > 80
+        ? "The room showed up."
+        : "A smaller room.";
   const tone =
     avg >= 20
       ? "Top replies are landing hard."
@@ -274,10 +290,12 @@ function verdict(
   const champ = mostUpvoted
     ? ` The most upvoted take is from u/${mostUpvoted.author} at ${mostUpvoted.score} points.`
     : "";
-  return `${heat} ${tone}${chorus}${champ}`;
+  return `${heat} ${tone}${chorus}${champ}${coverage}`;
 }
 
-export function rankHighlights(comments: RedditComment[]): RedditReport["highlights"] {
+export function rankHighlights(
+  comments: RedditComment[],
+): RedditReport["highlights"] {
   const live = comments.filter(usable);
   const topIds = new Set(
     [...live]
@@ -287,7 +305,10 @@ export function rankHighlights(comments: RedditComment[]): RedditReport["highlig
   );
 
   const mostUpvoted = pickMax(live, (comment) => comment.score);
-  const mostReplied = pickMax(live, (comment) => comment.directReplies * 10 + comment.descendants);
+  const mostReplied = pickMax(
+    live,
+    (comment) => comment.directReplies * 10 + comment.descendants,
+  );
   const longest = pickMax(live, (comment) => comment.body.length);
   const mostAwarded = pickMax(
     live.filter((comment) => comment.awards > 0),
@@ -308,7 +329,9 @@ export function rankHighlights(comments: RedditComment[]): RedditReport["highlig
     (comment) => comment.score,
   );
   const punchiest = pickMax(
-    live.filter((comment) => comment.body.length >= 12 && comment.body.length <= 180),
+    live.filter(
+      (comment) => comment.body.length >= 12 && comment.body.length <= 180,
+    ),
     (comment) => comment.score * (1 + comment.awards),
   );
 
@@ -323,15 +346,26 @@ export function rankHighlights(comments: RedditComment[]): RedditReport["highlig
   };
 }
 
-export function mapRoom(post: RedditPost, comments: RedditComment[]): RedditReport["room"] {
+export function mapRoom(
+  post: RedditPost,
+  comments: RedditComment[],
+): RedditReport["room"] {
   const live = comments.filter(usable);
   const phrases = repeatingPhrases(live);
   const mostUpvoted = pickMax(live, (comment) => comment.score);
-  const questionCount = live.filter((comment) => comment.body.includes("?")).length;
-  const linkCount = live.filter((comment) => /https?:\/\//i.test(comment.body)).length;
+  const questionCount = live.filter((comment) =>
+    comment.body.includes("?"),
+  ).length;
+  const linkCount = live.filter((comment) =>
+    /https?:\/\//i.test(comment.body),
+  ).length;
   const deletedOrRemoved = comments.filter((comment) => {
     const body = comment.body.trim();
-    return body === "[deleted]" || body === "[removed]" || comment.author === "[deleted]";
+    return (
+      body === "[deleted]" ||
+      body === "[removed]" ||
+      comment.author === "[deleted]"
+    );
   }).length;
 
   const scoreSplit = { positive: 0, zero: 0, negative: 0 };
@@ -366,29 +400,37 @@ export function pickTopComments(comments: RedditComment[]): CommentCard[] {
 
 export function summarizeSample(
   comments: RedditComment[],
+  listed = comments.length,
 ): RedditReport["sample"] {
   const live = comments.filter(usable);
   const scores = live.map((comment) => comment.score);
   const authors = new Set(live.map((comment) => comment.author));
   return {
     commentsLoaded: comments.length,
+    commentsListed: listed,
+    complete: listed === 0 || comments.length >= listed * 0.9,
     uniqueCommenters: authors.size,
     opReplies: live.filter((comment) => comment.isOp).length,
     maxDepth: live.reduce((max, comment) => Math.max(max, comment.depth), 0),
     avgScore:
       scores.length === 0
         ? 0
-        : Math.round((scores.reduce((sum, value) => sum + value, 0) / scores.length) * 10) /
-          10,
+        : Math.round(
+            (scores.reduce((sum, value) => sum + value, 0) / scores.length) *
+              10,
+          ) / 10,
     medianScore: Math.round(median(scores) * 10) / 10,
   };
 }
 
-export function buildReport(post: RedditPost, comments: RedditComment[]): RedditReport {
+export function buildReport(
+  post: RedditPost,
+  comments: RedditComment[],
+): RedditReport {
   return {
     kind: "reddit",
     post,
-    sample: summarizeSample(comments),
+    sample: summarizeSample(comments, post.numComments),
     highlights: rankHighlights(comments),
     topComments: pickTopComments(comments),
     room: mapRoom(post, comments),

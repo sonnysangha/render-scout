@@ -7,7 +7,13 @@ import {
   summarizeSample,
   type RedditReport,
 } from "./insights.js";
-import { fetchRedditThread, type RedditComment, type RedditPost } from "./reddit.js";
+import {
+  commentsFromRows,
+  fetchAllComments,
+  loadRedditPost,
+  type RedditComment,
+  type RedditPost,
+} from "./reddit.js";
 
 const retry = {
   maxRetries: 3,
@@ -15,10 +21,19 @@ const retry = {
   backoffScaling: 1.5,
 };
 
-const fetchThread = task(
-  { name: "fetchThread", retry },
-  async function fetchThread(url: string) {
-    return fetchRedditThread(url);
+const fetchPost = task(
+  { name: "fetchPost", retry },
+  async function fetchPost(url: string) {
+    return loadRedditPost(url);
+  },
+);
+
+const fetchComments = task(
+  { name: "fetchAllComments", retry },
+  async function fetchComments(
+    postId: string,
+  ): Promise<Record<string, unknown>[]> {
+    return fetchAllComments(postId);
   },
 );
 
@@ -62,16 +77,22 @@ task(
   ): Promise<{ auditId: number; comments: number }> {
     try {
       await setAudit(auditId, { status: "running" });
-      const thread = await fetchThread(url);
+      const loaded = await fetchPost(url);
+      const rows =
+        loaded.liveComments === null
+          ? await fetchComments(loaded.post.id)
+          : [];
+      const comments =
+        loaded.liveComments ?? commentsFromRows(loaded.post, rows);
       const [highlights, room, topComments] = await Promise.all([
-        rankThread(thread.comments),
-        mapThreadRoom(thread.post, thread.comments),
-        listTopComments(thread.comments),
+        rankThread(comments),
+        mapThreadRoom(loaded.post, comments),
+        listTopComments(comments),
       ]);
       const report: RedditReport = {
         kind: "reddit",
-        post: thread.post,
-        sample: summarizeSample(thread.comments),
+        post: loaded.post,
+        sample: summarizeSample(comments, loaded.post.numComments),
         highlights,
         topComments,
         room,

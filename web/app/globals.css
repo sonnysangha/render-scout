@@ -179,6 +179,14 @@ nav a,
   text-transform: uppercase;
 }
 
+.coverage {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
 .grid {
   display: grid;
   gap: 14px;

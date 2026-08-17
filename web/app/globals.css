@@ -1,0 +1,68 @@
+:root {
+  color: #111;
+  background: #f6f6f4;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  max-width: 720px;
+  margin: 48px auto;
+  padding: 0 20px;
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+p,
+label {
+  color: #444;
+  line-height: 1.5;
+}
+
+form {
+  display: flex;
+  gap: 8px;
+  margin: 24px 0;
+}
+
+input,
+button {
+  font: inherit;
+  padding: 10px 12px;
+}
+
+input {
+  flex: 1;
+  border: 1px solid #ccc;
+  background: #fff;
+}
+
+button {
+  border: 0;
+  background: #111;
+  color: #fff;
+}
+
+pre {
+  background: #fff;
+  border: 1px solid #ddd;
+  padding: 16px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+ul {
+  padding-left: 18px;
+  color: #444;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}

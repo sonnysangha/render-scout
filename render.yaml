@@ -1,7 +1,3 @@
-previews:
-  generation: automatic
-  expireAfterDays: 3
-
 databases:
   - name: scout-db
     plan: basic-256mb

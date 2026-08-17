@@ -23,7 +23,7 @@ projects:
             plan: free
             region: oregon
             rootDir: web
-            buildCommand: npm ci && npm run build
+            buildCommand: npm ci --include=dev && npm run build
             startCommand: npm run migrate && npm start
             healthCheckPath: /health
             autoDeployTrigger: commit

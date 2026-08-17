@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AuditReport } from "@/components/audit-report";
+import type { Audit } from "@/lib/audits";
+import { asRedditReport, reportError } from "@/lib/report";
 
 export function AuditStatus({ id }: { id: string }) {
-  const [text, setText] = useState("Loading audit " + id + "…");
+  const [audit, setAudit] = useState<Audit | null>(null);
+  const [message, setMessage] = useState("Opening the thread…");
 
   useEffect(() => {
     let cancelled = false;
@@ -14,10 +18,10 @@ export function AuditStatus({ id }: { id: string }) {
         return;
       }
       if (!res.ok) {
-        setText("Audit " + id + " not found.");
+        setMessage("Audit " + id + " not found.");
         return;
       }
-      setText(JSON.stringify(await res.json(), null, 2));
+      setAudit((await res.json()) as Audit);
     }
 
     void refresh();
@@ -31,5 +35,31 @@ export function AuditStatus({ id }: { id: string }) {
     };
   }, [id]);
 
-  return <pre>{text}</pre>;
+  if (!audit) {
+    return <p className="status">{message}</p>;
+  }
+
+  if (audit.status === "queued" || audit.status === "running") {
+    return (
+      <p className="status">
+        {audit.status === "queued"
+          ? "Queued. Render Workflows is picking this up."
+          : "Pulling the thread, then fanning out ranking, room signal, and top comments."}
+      </p>
+    );
+  }
+
+  const failed = reportError(audit.report);
+  if (audit.status === "failed" || failed) {
+    return <p className="status error">{failed ?? "The workflow failed."}</p>;
+  }
+
+  const report = asRedditReport(audit.report);
+  if (!report) {
+    return (
+      <pre>{JSON.stringify(audit.report, null, 2)}</pre>
+    );
+  }
+
+  return <AuditReport report={report} />;
 }

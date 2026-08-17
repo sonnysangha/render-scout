@@ -2,17 +2,22 @@
 
 import { redirect } from "next/navigation";
 import { createAudit } from "@/lib/audits";
+import { isRedditPostUrl } from "@/lib/reddit-url";
 
 export async function startAudit(formData: FormData) {
   const url = String(formData.get("url") ?? "").trim();
   if (!url) {
-    throw new Error("url is required");
+    redirect("/?error=reddit");
   }
 
   try {
     new URL(url);
   } catch {
-    throw new Error("url is invalid");
+    redirect("/?error=reddit");
+  }
+
+  if (!isRedditPostUrl(url)) {
+    redirect("/?error=reddit");
   }
 
   const audit = await createAudit(url);

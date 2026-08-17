@@ -1,5 +1,6 @@
 import { Render } from "@renderinc/sdk";
 import { getPool } from "../lib/db";
+import { isRedditPostUrl } from "../lib/reddit-url";
 
 async function main() {
   const workflowSlug = process.env.WORKFLOW_SLUG ?? "scout";
@@ -14,6 +15,9 @@ async function main() {
   );
 
   for (const row of rows) {
+    if (!isRedditPostUrl(row.url)) {
+      continue;
+    }
     const inserted = await pool.query<{ id: number; url: string }>(
       `INSERT INTO audits (url, status) VALUES ($1, 'queued') RETURNING id, url`,
       [row.url],

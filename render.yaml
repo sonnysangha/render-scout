@@ -1,63 +1,67 @@
-databases:
-  - name: scout-db
-    plan: free
-    region: oregon
-    postgresMajorVersion: "16"
-    ipAllowList: []
+projects:
+  - name: scout
+    environments:
+      - name: production
+        databases:
+          - name: scout-db
+            plan: free
+            region: oregon
+            postgresMajorVersion: "16"
+            ipAllowList: []
 
-services:
-  - type: keyvalue
-    name: scout-cache
-    plan: free
-    region: oregon
-    maxmemoryPolicy: allkeys-lru
-    ipAllowList: []
+        services:
+          - type: keyvalue
+            name: scout-cache
+            plan: free
+            region: oregon
+            maxmemoryPolicy: allkeys-lru
+            ipAllowList: []
 
-  - type: web
-    name: scout-web
-    runtime: node
-    plan: free
-    region: oregon
-    rootDir: web
-    buildCommand: npm ci && npm run build
-    startCommand: npm run migrate && npm start
-    healthCheckPath: /health
-    autoDeployTrigger: commit
-    envVars:
-      - key: HOSTNAME
-        value: 0.0.0.0
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: scout-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          name: scout-cache
-          type: keyvalue
-          property: connectionString
-      - key: WORKFLOW_SLUG
-        value: scout
-      - key: RENDER_API_KEY
-        sync: false
+          - type: web
+            name: scout-web
+            runtime: node
+            plan: free
+            region: oregon
+            rootDir: web
+            buildCommand: npm ci && npm run build
+            startCommand: npm run migrate && npm start
+            healthCheckPath: /health
+            autoDeployTrigger: commit
+            envVars:
+              - key: HOSTNAME
+                value: 0.0.0.0
+              - key: NODE_ENV
+                value: production
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: scout-db
+                  property: connectionString
+              - key: REDIS_URL
+                fromService:
+                  name: scout-cache
+                  type: keyvalue
+                  property: connectionString
+              - key: WORKFLOW_SLUG
+                value: scout
+              - key: RENDER_API_KEY
+                sync: false
 
-  - type: cron
-    name: scout-cron
-    runtime: node
-    plan: starter
-    region: oregon
-    rootDir: web
-    schedule: "0 6 * * *"
-    buildCommand: npm ci
-    startCommand: npm run cron
-    autoDeployTrigger: commit
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: scout-db
-          property: connectionString
-      - key: WORKFLOW_SLUG
-        value: scout
-      - key: RENDER_API_KEY
-        sync: false
+          - type: cron
+            name: scout-cron
+            runtime: node
+            plan: starter
+            region: oregon
+            rootDir: web
+            schedule: "0 6 * * *"
+            buildCommand: npm ci
+            startCommand: npm run cron
+            autoDeployTrigger: commit
+            envVars:
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: scout-db
+                  property: connectionString
+              - key: WORKFLOW_SLUG
+                value: scout
+              - key: RENDER_API_KEY
+                sync: false

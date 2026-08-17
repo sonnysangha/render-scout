@@ -1,18 +1,18 @@
 # Scout
 
-Demo app for the Render influencer brief. Paste a URL. A Render Workflow crawls it, fans out page analysis, retries failed fetches, and writes a report to Postgres. The web service and cron job live in one Blueprint. The Workflow is created in the Dashboard — Blueprints do not support Workflows yet.
+Demo app for the Render influencer brief. Paste a URL. A Render Workflow crawls it, fans out page analysis, retries failed fetches, and writes a report to Postgres. The web service, Postgres, Key Value, and cron job live in the `scout` / `production` project environment. The Workflow is created in the Dashboard — Blueprints do not support Workflows yet.
 
 ## What Render runs
 
-| Resource    | Name          | Role                                                       |
-| ----------- | ------------- | ---------------------------------------------------------- |
-| Web service | `scout-web`   | Next.js app, `/health`, starts `startAudit`                |
-| Postgres    | `scout-db`    | Audit rows and reports                                     |
-| Key Value   | `scout-cache` | Live audit JSON for polling                                |
+| Resource    | Name          | Role                                                          |
+| ----------- | ------------- | ------------------------------------------------------------- |
+| Web service | `scout-web`   | Next.js app, `/health`, starts `startAudit`                   |
+| Postgres    | `scout-db`    | Audit rows and reports                                        |
+| Key Value   | `scout-cache` | Live audit JSON for polling                                   |
 | Cron        | `scout-cron`  | 06:00 UTC — re-runs recent URLs (starter, cheapest cron plan) |
-| Workflow    | `scout`       | `startAudit` → `crawlSite` + `analyzePage` → `writeReport` |
+| Workflow    | `scout`       | `startAudit` → `crawlSite` + `analyzePage` → `writeReport`    |
 
-Private networking is the default: `DATABASE_URL` and `REDIS_URL` are internal connection strings from the Blueprint.
+These resources belong to a [Render project](https://render.com/docs/projects) named `scout`, environment `production`. Private networking is the default: `DATABASE_URL` and `REDIS_URL` are internal connection strings from the Blueprint.
 
 ## Deploy
 

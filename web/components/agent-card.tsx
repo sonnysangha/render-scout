@@ -35,7 +35,12 @@ export function AgentCard({
       </header>
 
       {content ? (
-        <div className="agent-output">
+        <div
+          className="agent-output"
+          role="region"
+          aria-label={`${name} brief`}
+          tabIndex={0}
+        >
           {content.split(/\n\n+/).map((paragraph, index) => (
             <p key={`${name}-${index}`}>{paragraph}</p>
           ))}

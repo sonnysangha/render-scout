@@ -1,16 +1,10 @@
 import type { Metadata } from "next";
-import { Fraunces, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { Fraunces, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 
 const display = Fraunces({
   subsets: ["latin"],
   variable: "--font-display",
-});
-
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-mono",
 });
 
 const body = IBM_Plex_Sans({
@@ -20,9 +14,9 @@ const body = IBM_Plex_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Scout — Reddit thread intelligence",
+  title: "Draftroom — AI YouTube scriptwriter",
   description:
-    "Analyze a Reddit thread and surface its themes, disagreements, and standout comments.",
+    "Turn one video idea into research, hooks, a strong outline, and a ready-to-record YouTube script.",
 };
 
 export default function RootLayout({
@@ -31,10 +25,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${display.variable} ${body.variable} ${mono.variable}`}>
-        {children}
-      </body>
+    <html lang="en" data-scroll-behavior="smooth">
+      <body className={`${display.variable} ${body.variable}`}>{children}</body>
     </html>
   );
 }

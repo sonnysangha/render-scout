@@ -1,151 +1,150 @@
-import { AuditStatus } from "@/components/audit-status";
-import { getAudit, listAudits } from "@/lib/audits";
-import { asRedditReport } from "@/lib/report";
-import { startAudit } from "./actions";
+import { RunStatus } from "@/components/run-status";
+import { SubmitButton } from "@/components/submit-button";
+import { getRun, type ScriptRun } from "@/lib/runs";
+import { startScript } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+type DemoMode = "running" | "ready";
+
+function formError(error?: string): string | null {
+  if (!error) {
+    return null;
+  }
+  if (error === "long") {
+    return "Keep the prompt under 4,000 characters.";
+  }
+  if (error === "limit") {
+    return "Draftroom is busy or this browser has reached its run limit. Try again shortly.";
+  }
+  if (error === "service") {
+    return "Draftroom could not start that run. Please try again shortly.";
+  }
+  return "Give the writers a little more to work with—at least 10 characters.";
+}
+
+function demoRun(mode: DemoMode): ScriptRun {
+  const ready = mode === "ready";
+
+  return {
+    id: "demo",
+    status: ready ? "done" : "running",
+    research:
+      "Small teams benefit most when agents handle bounded, verifiable work rather than vague end-to-end requests.\n\nUseful evidence to include:\n• Agents can research, test, and draft in parallel.\n• Human review remains the quality gate.\n• The strongest examples show faster feedback loops, not just faster typing.",
+    hooks:
+      "Best bet\nA five-person engineering team can now work like a team of twenty—but only if it stops treating AI like autocomplete.\n\nAlternatives\n• The biggest change in software is not who writes the code. It is how many tasks can move at once.\n• AI agents do not replace your team. They remove the queue in front of it.",
+    outline: ready
+      ? "1. Cold open — contrast autocomplete with parallel work\n2. The old bottleneck — every task waits for one person\n3. The writers' room model — specialist agents work at once\n4. A practical example — research, implementation, and QA\n5. Guardrails — scoped tasks and human review\n6. Takeaway — optimize the workflow, not the prompt"
+      : null,
+    audience: ready
+      ? "Viewer\nDevelopers, founders, and technical creators who have tried AI coding tools but still work one task at a time.\n\nPromise\nShow them a concrete operating model they can use today.\n\nTone\nConfident, practical, and skeptical of hype."
+      : null,
+    final_script: ready
+      ? `[HOOK]\nA five-person engineering team can now work like a team of twenty—but only if it stops treating AI like autocomplete.\n\n[OPEN]\nMost people use an AI coding tool exactly like a faster search box. They ask one question, wait for one answer, and then move to the next task. That can save time, but it misses the much bigger shift.\n\nThe real advantage is parallel work. While one agent researches the problem, another can map the implementation, another can look for failure cases, and another can prepare the tests. Your team is no longer waiting for every small job to move through one pair of hands.\n\n[THE OLD BOTTLENECK]\nIn a normal workflow, good ideas spend most of their life in a queue. Research waits for an engineer. Testing waits for implementation. Documentation waits for the final code. The work itself may only take an hour, but the handoffs turn it into a day.\n\n[THE NEW MODEL]\nThink of AI agents as a writers' room for software. Give each one a narrow role, a clear output, and a shared goal. Then let them work at the same time. The research agent returns evidence. The implementation agent proposes the smallest change. The reviewer looks for risk. The test agent proves whether it works.\n\nThe human still makes the decisions. That part matters. Agents are useful because they make more options available sooner—not because every answer is automatically correct.\n\n[PRACTICAL RULE]\nStart with tasks you can verify. Ask for a test result, a source, a diff, or a working screen. If you cannot describe what “done” looks like, the agent cannot reliably get you there.\n\n[CLOSE]\nThe teams that win with agents will not be the ones with the cleverest single prompt. They will be the ones that redesign their workflow so useful work can happen in parallel, then keep a human firmly at the quality gate.`
+      : null,
+  };
+}
 
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ id?: string; error?: string }>;
+  searchParams: Promise<{ id?: string; error?: string; demo?: string }>;
 }) {
-  const { id, error } = await searchParams;
-  const selectedId = id && /^\d+$/.test(id) ? Number(id) : null;
-  const [audits, selectedAudit] = await Promise.all([
-    listAudits().catch(() => []),
-    selectedId ? getAudit(selectedId).catch(() => null) : null,
-  ]);
-  const history = audits
-    .filter((audit) => String(audit.id) !== id)
-    .slice(0, 6);
+  const { id, error, demo } = await searchParams;
+  const errorMessage = formError(error);
+  const selectedId =
+    id &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+      ? id
+      : null;
+  const demoMode =
+    process.env.NODE_ENV !== "production" &&
+    process.env.DRAFTROOM_DEMO === "true" &&
+    (demo === "running" || demo === "ready")
+      ? demo
+      : null;
+  const initialRun = demoMode
+    ? demoRun(demoMode)
+    : selectedId
+      ? await getRun(selectedId).catch(() => null)
+      : null;
+  const hasRun = Boolean(demoMode || selectedId);
 
   return (
-    <main className={`site-shell${id ? " has-report" : ""}`}>
+    <main className={`site-shell${hasRun ? " has-run" : ""}`}>
       <header className="site-header">
-        <a className="brand" href="/" aria-label="Scout home">
+        <a className="brand" href="/" aria-label="Draftroom home">
           <span className="brand-mark" aria-hidden="true">
-            <span />
+            D
           </span>
-          <span className="brand-copy">
-            <strong>Scout</strong>
-            <small>Thread intelligence</small>
+          <span>
+            <strong>Draftroom</strong>
+            <small>YouTube script studio</small>
           </span>
         </a>
         <p className="render-note">
           <span aria-hidden="true" />
-          Powered by Render Workflows
+          Running on Render
         </p>
       </header>
 
-      <section className={`scanner${id ? " scanner--compact" : ""}`}>
-        <div className="intro-copy">
-          <p className="eyebrow">Reddit, distilled</p>
-          <h1>
-            See what the thread is <em>really</em> saying.
+      <section className="hero" aria-labelledby="page-heading">
+        <div className="hero-copy">
+          <p className="eyebrow">One idea. A full writers&apos; room.</p>
+          <h1 id="page-heading">
+            Make the video <em>worth watching.</em>
           </h1>
           <p className="lede">
-            Scout reads the full conversation and surfaces the themes,
-            disagreements, and comments driving the discussion.
+            Four specialists explore your idea in parallel. A lead writer turns
+            their strongest thinking into one ready-to-record script.
           </p>
         </div>
 
-        <div className="scan-panel" id="new-scan">
-          <div className="scan-panel__topline">
-            <span>New analysis</span>
-            <span aria-hidden="true">01</span>
+        <div className="prompt-panel" id="prompt">
+          <div className="panel-heading">
+            <span>Start with your idea</span>
+            <span aria-hidden="true">✦</span>
           </div>
-          <form className="scan-form" action={startAudit}>
-            <label htmlFor="url">Reddit post URL</label>
-            <div className="scan-form__row">
-              <input
-                id="url"
-                name="url"
-                type="url"
-                required
-                placeholder="https://reddit.com/r/…/comments/…"
-                aria-describedby="url-hint"
-              />
-              <button type="submit">
-                Analyze thread <span aria-hidden="true">→</span>
-              </button>
+          {errorMessage ? (
+            <div className="form-error form-error--panel" role="alert">
+              <span aria-hidden="true">!</span>
+              <p>{errorMessage}</p>
+            </div>
+          ) : null}
+          <form action={startScript}>
+            <label htmlFor="prompt-input">What should the video be about?</label>
+            <textarea
+              id="prompt-input"
+              name="prompt"
+              minLength={10}
+              maxLength={4_000}
+              required
+              rows={6}
+              placeholder="Explain the topic, the viewer, and anything the script should include…"
+              aria-describedby="prompt-hint"
+            />
+            <div className="prompt-actions">
+              <p id="prompt-hint">
+                Research, hooks, structure, and audience direction run together.
+              </p>
+              <SubmitButton />
             </div>
           </form>
-          <p className="form-hint" id="url-hint">
-            Available replies are ranked and summarized in one report.
-          </p>
         </div>
       </section>
 
-      {error === "reddit" ? (
-        <div className="status-card status-card--error" role="alert">
-          <span className="status-icon" aria-hidden="true">
-            !
-          </span>
-          <div>
-            <strong>That link is not a Reddit post.</strong>
-            <p>Use the URL for a specific thread, not a homepage or subreddit.</p>
-          </div>
-        </div>
-      ) : null}
-      {id ? (
-        <AuditStatus key={id} id={id} initialAudit={selectedAudit} />
-      ) : null}
-
-      {history.length > 0 ? (
-        <section className="history-section" aria-labelledby="history-heading">
-          <div className="section-heading section-heading--history">
-            <div>
-              <p className="eyebrow">Recent scans</p>
-              <h2 id="history-heading">Previously analyzed</h2>
-            </div>
-            <span>{history.length.toString().padStart(2, "0")} reports</span>
-          </div>
-          <ul className="history">
-            {history.map((audit) => {
-              const report = asRedditReport(audit.report);
-              const date = new Date(audit.created_at);
-              const statusLabel = audit.status === "done" ? "Ready" : audit.status;
-              return (
-                <li key={audit.id}>
-                  <a href={`/?id=${audit.id}`}>
-                    <span className="history-index" aria-hidden="true">
-                      {String(audit.id).padStart(2, "0")}
-                    </span>
-                    <span className="history-copy">
-                      <strong>{report?.post.title ?? audit.url}</strong>
-                      <small>
-                        {report ? `r/${report.post.subreddit}` : "Reddit thread"}
-                        {Number.isNaN(date.getTime())
-                          ? ""
-                          : ` · ${new Intl.DateTimeFormat("en", {
-                              month: "short",
-                              day: "numeric",
-                              timeZone: "UTC",
-                            }).format(date)}`}
-                      </small>
-                    </span>
-                    <span
-                      className={`history-status${
-                        audit.status === "done" ? " is-ready" : ""
-                      }`}
-                    >
-                      {statusLabel}
-                    </span>
-                    <span className="history-arrow" aria-hidden="true">
-                      ↗
-                    </span>
-                  </a>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+      {hasRun ? (
+        <RunStatus
+          key={demoMode ?? selectedId}
+          id={selectedId ?? "demo"}
+          initialRun={initialRun}
+          polling={!demoMode}
+        />
       ) : null}
 
       <footer className="site-footer">
-        <span>Scout</span>
-        <span>Signal over noise.</span>
+        <span>Draftroom</span>
+        <span>Orchestrated with Render Workflows</span>
       </footer>
     </main>
   );

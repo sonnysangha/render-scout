@@ -1,79 +1,261 @@
-# Scout
+# Draftroom
 
-Demo app for the Render influencer brief. Paste a URL. A Render Workflow crawls it, fans out page analysis, retries failed fetches, and writes a report to Postgres. The web service, Postgres, Key Value, and cron job live in the `scout` / `production` project environment. The Workflow is created in the Dashboard — Blueprints do not support Workflows yet.
+## Start here
 
-## What Render runs
+1. [Create your Render account](https://dashboard.render.com/register?utm_source=youtube&utm_medium=other&utm_campaign=2026_partnership_sonny) using this link.
+2. [Claim $50 in free Render credits](https://credits-portal-mmdm.onrender.com/claim/sonny-youtube) after creating your account.
 
-| Resource    | Name          | Role                                                          |
-| ----------- | ------------- | ------------------------------------------------------------- |
-| Web service | `scout-web`   | Next.js app, `/health`, starts `startAudit`                   |
-| Postgres    | `scout-db`    | Audit rows and reports                                        |
-| Key Value   | `scout-cache` | Live audit JSON for polling                                   |
-| Cron        | `scout-cron`  | 06:00 UTC — re-runs recent URLs (starter, cheapest cron plan) |
-| Workflow    | `scout`       | `startAudit` → `crawlSite` + `analyzePage` → `writeReport`    |
+Draftroom turns one YouTube idea into a ready-to-record script. A Render
+Workflow runs four specialist agents in parallel, saves each brief to Postgres
+as it arrives, then asks a final agent to assemble the script. The Next.js app
+polls Postgres and reveals the work live.
 
-These resources belong to a [Render project](https://render.com/docs/projects) named `scout`, environment `production`. Private networking is the default: `DATABASE_URL` and `REDIS_URL` are internal connection strings from the Blueprint.
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://dashboard.render.com/blueprint/new?repo=https://github.com/sonnysangha/render-scout)
 
-## Deploy
+The button provisions the Web service and Postgres database. Render Workflows
+are created separately, so complete the short Workflow step in
+[Render deployment](#render-deployment) before submitting a prompt.
 
-1. Push this repo to GitHub, GitLab, or Bitbucket.
-2. Validate the Blueprint:
+## Architecture
 
-   ```bash
-   render whoami -o json
-   render blueprints validate
-   ```
+| Render resource | Name | Responsibility |
+| --- | --- | --- |
+| Web service | `scout-web` | Prompt UI, run API, rate limiting, and `/health` |
+| Postgres | `scout-db` | Run status, specialist briefs, and final scripts |
+| Workflow | `draftroom` | Four parallel specialists and the final writer |
 
-3. Apply the Blueprint: [dashboard.render.com/blueprint/new](https://dashboard.render.com/blueprint/new) and point it at the repo. Set `RENDER_API_KEY` when prompted (`sync: false`).
-4. Create the Workflow in the Dashboard: **New → Workflow**.
+The Vercel AI SDK is used as a Node.js library inside the Workflow. OpenAI is
+the model provider. `OPENAI_API_KEY` belongs only to the Workflow; it is never
+exposed to the browser or Web service.
 
-   | Field          | Value                                |
-   | -------------- | ------------------------------------ |
-   | Name           | `scout` (must match `WORKFLOW_SLUG`) |
-   | Root Directory | `workflows`                          |
-   | Language       | Node                                 |
-   | Build command  | `npm install`                        |
-   | Start command  | `npm start`                          |
+## Prerequisites
 
-   Add `DATABASE_URL` and `REDIS_URL` from the Connect tabs on `scout-db` and `scout-cache` (internal URLs).
+- Node.js 22.9 or newer
+- Docker Desktop for local Postgres
+- Render CLI 2.11 or newer
+- An OpenAI API key
+- A Render account for deployed runs
 
-   Or with the CLI:
+Check the Render CLI:
 
-   ```bash
-   render workflows create \
-     --name scout \
-     --runtime node \
-     --root-directory workflows \
-     --build-command "npm install" \
-     --run-command "npm start" \
-     --repo <your-repo-url>
-   ```
+```bash
+render --version
+render whoami
+```
 
-   Then set `DATABASE_URL` and `REDIS_URL` on the Workflow (internal URLs).
+## Local setup
 
-5. Open the `scout-web` URL. Submit `https://render.com`. The page polls `/api/audits/:id` every 2 seconds.
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://dashboard.render.com/blueprint/new?repo=https://github.com/sonnysangha/render-scout)
 
-## Local Workflows
+Use the button for a hosted setup, or continue below to run Draftroom locally.
 
-Official hello-world tasks do not need a database:
+### 1. Start Postgres
+
+The Compose service uses Postgres 16 and binds only to
+`127.0.0.1:5433`. Port `5433` avoids colliding with another local Postgres on
+the usual `5432` port.
+
+```bash
+docker compose up -d postgres
+docker compose ps
+```
+
+### 2. Create the local environment files
+
+The commands below do not overwrite files that already exist:
+
+```bash
+test -f web/.env.local || cp web/.env.example web/.env.local
+test -f workflows/.env.local || cp workflows/.env.example workflows/.env.local
+```
+
+There is intentionally no root `.env.local`. `web` and `workflows` are
+separate runtimes, so each directory owns only the variables it consumes.
+Both `.env.local` files are ignored by Git.
+
+### 3. Configure `web/.env.local`
+
+```env
+DATABASE_URL=postgres://draftroom:draftroom@127.0.0.1:5433/draftroom
+RENDER_API_KEY=local
+RENDER_USE_LOCAL_DEV=true
+WORKFLOW_SLUG=draftroom
+RATE_LIMIT_SECRET=
+DRAFTROOM_DEMO=false
+```
+
+For local development, `RATE_LIMIT_SECRET` can remain empty because the app
+uses a local-only fallback. To mirror production, generate and paste a secret:
+
+```bash
+openssl rand -hex 32
+```
+
+`RENDER_USE_LOCAL_DEV=true` makes the Render SDK call the local Workflow server
+on port `8120`. Never set it on the deployed Web service.
+
+### 4. Configure `workflows/.env.local`
+
+```env
+DATABASE_URL=postgres://draftroom:draftroom@127.0.0.1:5433/draftroom
+OPENAI_API_KEY=your_openai_key
+OPENAI_MODEL=gpt-5.6-luna
+```
+
+Replace `your_openai_key` with a real key. `OPENAI_MODEL` is optional; when it
+is absent, Draftroom defaults to `gpt-5.6-luna`.
+
+### 5. Install dependencies and migrate the database
+
+```bash
+cd web
+npm ci
+npm run migrate
+
+cd ../workflows
+npm ci
+```
+
+### 6. Run the Workflow and Web service
+
+Keep both terminals running.
+
+Terminal 1 — local Render Workflow server:
 
 ```bash
 cd workflows
 render workflows dev -- npm start
 ```
 
-In another terminal:
+Terminal 2 — Next.js:
 
 ```bash
-render workflows tasks start calculateSquare --local --input='[5]'
-render workflows tasks start flipCoin --local --input='[]'
+cd web
+npm run dev
 ```
 
-`startAudit` needs `DATABASE_URL` and `REDIS_URL` (external URLs, `sslmode=require` on Postgres).
+Open [http://localhost:3000](http://localhost:3000). Submitting a prompt uses
+the local Workflow server and local Postgres, while the Workflow itself calls
+OpenAI.
 
-## Notes
+To confirm task registration while Terminal 1 is running:
 
-- Next.js starts with `next start -H 0.0.0.0` so it binds `0.0.0.0:$PORT`. Health check is `GET /health`.
-- Do not put the Workflow in `render.yaml`.
-- Services use the free plan. Free web services spin down after 15 minutes of inactivity. `preDeployCommand` is paid-only, so migrations run in the start command.
-- Cron jobs have no free plan. `scout-cron` uses `starter` (cheapest cron instance, $1/month minimum).
+```bash
+render workflows tasks list --local --output json
+```
+
+It should list `writeYouTubeScript`, `runScriptSpecialist`, and
+`assembleYouTubeScript`.
+
+## Environment variables
+
+### Web service
+
+| Variable | Required | Local value | Render value | Purpose |
+| --- | --- | --- | --- | --- |
+| `DATABASE_URL` | Yes | Docker URL on port `5433` | Injected from `scout-db` by `render.yaml` | Postgres connection |
+| `RENDER_API_KEY` | Yes | `local` | Secret Render API key | Lets the Web service start Workflow tasks |
+| `RENDER_USE_LOCAL_DEV` | Local only | `true` | Leave unset | Routes the SDK to the local task server |
+| `WORKFLOW_SLUG` | No | `draftroom` | `draftroom` | Prefix for `draftroom/writeYouTubeScript` |
+| `RATE_LIMIT_SECRET` | Production | Optional locally | Random secret | Hashes request identity for the Postgres-backed rate limit |
+| `DRAFTROOM_DEMO` | No | `false`; use `true` only for UI fixtures | Leave unset | Enables development-only `?demo=running` and `?demo=ready` states |
+
+`NODE_ENV`, `PORT`, and other platform variables are managed by Next.js or
+Render. They do not belong in `web/.env.local`.
+
+### Workflow
+
+| Variable | Required | Local value | Render value | Purpose |
+| --- | --- | --- | --- | --- |
+| `DATABASE_URL` | Yes | Docker URL on port `5433` | Internal URL from `scout-db` | Writes progress and the completed script |
+| `OPENAI_API_KEY` | Yes | Your OpenAI key | Secret OpenAI key | Authenticates Vercel AI SDK requests |
+| `OPENAI_MODEL` | No | `gpt-5.6-luna` | `gpt-5.6-luna` or another supported model | Selects the OpenAI model |
+
+Do not commit either `.env.local` file and do not place `OPENAI_API_KEY` in the
+Web service.
+
+Draftroom also enforces a small global concurrency and hourly ceiling so a
+public demo cannot create unbounded OpenAI usage. Set a separate project budget
+limit in the OpenAI dashboard as the final billing safeguard.
+
+## Render deployment
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://dashboard.render.com/blueprint/new?repo=https://github.com/sonnysangha/render-scout)
+
+The Blueprint deploys `scout-web` and `scout-db`. Then create the `draftroom`
+Workflow using step 2 below.
+
+### 1. Web service and Postgres
+
+The Blueprint defines `scout-web` and `scout-db`:
+
+```bash
+render blueprints validate
+```
+
+Connect the repository as a Blueprint in the Render Dashboard. The Blueprint
+automatically injects the database's internal connection string into
+`scout-web` as `DATABASE_URL`.
+
+Set these secrets on `scout-web` under **Environment**:
+
+- `RENDER_API_KEY`: a real Render API key
+- `RATE_LIMIT_SECRET`: output from `openssl rand -hex 32`
+
+They use `sync: false` in `render.yaml`. Render prompts for them only when the
+Blueprint first creates the service. For an existing service or later
+Blueprint update, set them manually in the Dashboard and redeploy.
+
+Do not add `RENDER_USE_LOCAL_DEV` to Render.
+
+### 2. Workflow
+
+Render Workflows are configured separately from `render.yaml`:
+
+1. In the Render Dashboard, create or open the `draftroom` Workflow.
+2. Use this repository and set **Root Directory** to `workflows`.
+3. Set **Build Command** to `npm ci`.
+4. Set **Start Command** to `npm start`.
+5. Add these values under **Environment**:
+   - `DATABASE_URL`: copy the **internal** connection string from
+     `scout-db` → **Connect**.
+   - `OPENAI_API_KEY`: your OpenAI key.
+   - `OPENAI_MODEL`: `gpt-5.6-luna` unless you intentionally choose another
+     supported model.
+6. Deploy the Workflow and confirm that its three tasks register.
+
+Never use the local `127.0.0.1:5433` database URL on Render. Render services in
+the same workspace and region should use the internal Postgres URL.
+
+## Verification
+
+```bash
+cd web
+npm run migrate
+npm run build
+npx tsc --noEmit --incremental false
+
+cd ../workflows
+npm test
+npm run typecheck
+```
+
+After deployment:
+
+```bash
+curl -fsS https://scout-web-21qg.onrender.com/health
+```
+
+The endpoint should return `ok`.
+
+## Stopping local services
+
+Stop Postgres while keeping its named volume and data:
+
+```bash
+docker compose stop postgres
+```
+
+`docker compose down` removes the container and network but keeps the database
+volume. Avoid `docker compose down -v` unless you intentionally want to erase
+the local database.

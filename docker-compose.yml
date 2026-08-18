@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_DB: draftroom
+      POSTGRES_USER: draftroom
+      POSTGRES_PASSWORD: draftroom
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U draftroom -d draftroom"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - draftroom_postgres:/var/lib/postgresql/data
+
+volumes:
+  draftroom_postgres:

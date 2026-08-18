@@ -1,5 +1,6 @@
 import { Render } from "@renderinc/sdk";
 import { randomUUID } from "node:crypto";
+import { readCache, writeCache } from "./cache";
 import { getPool } from "./db";
 
 export type RunStatus =
@@ -33,6 +34,7 @@ const clientActiveLimit = 1;
 const clientHourlyLimit = 3;
 const globalActiveLimit = 2;
 const globalHourlyLimit = 12;
+const completedRunCacheTtlSeconds = 5 * 60;
 
 const runColumns = `
   public_id,
@@ -57,11 +59,28 @@ function toScriptRun(row: RunRow): ScriptRun {
 }
 
 export async function getRun(publicId: string): Promise<ScriptRun | null> {
+  const cacheKey = `draftroom:run:v1:${publicId}`;
+  const cached = await readCache(cacheKey);
+  if (cached) {
+    try {
+      const run = JSON.parse(cached) as ScriptRun;
+      if (run.id === publicId && run.status === "done") {
+        return run;
+      }
+    } catch {
+      // Ignore a malformed cache entry and use Postgres.
+    }
+  }
+
   const { rows } = await getPool().query<RunRow>(
     `SELECT ${runColumns} FROM script_runs WHERE public_id = $1`,
     [publicId],
   );
-  return rows[0] ? toScriptRun(rows[0]) : null;
+  const run = rows[0] ? toScriptRun(rows[0]) : null;
+  if (run?.status === "done") {
+    await writeCache(cacheKey, JSON.stringify(run), completedRunCacheTtlSeconds);
+  }
+  return run;
 }
 
 export async function createRun(

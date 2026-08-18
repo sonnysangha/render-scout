@@ -12,9 +12,9 @@ polls Postgres and reveals the work live.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://dashboard.render.com/blueprint/new?repo=https://github.com/sonnysangha/render-scout)
 
-The button provisions the Web service and Postgres database. Render Workflows
-are created separately, so complete the short Workflow step in
-[Render deployment](#render-deployment) before submitting a prompt.
+The button provisions the Web service, Postgres database, Key Value cache, and
+cleanup cron. Render Workflows are created separately, so complete that short
+step in [Render deployment](#render-deployment) before submitting a prompt.
 
 ## Architecture
 
@@ -22,7 +22,13 @@ are created separately, so complete the short Workflow step in
 | --- | --- | --- |
 | Web service | `scout-web` | Prompt UI, run API, rate limiting, and `/health` |
 | Postgres | `scout-db` | Run status, specialist briefs, and final scripts |
+| Key Value | `draftroom-cache` | Five-minute cache for completed runs |
+| Cron job | `draftroom-cleanup` | Deletes script runs older than seven days |
 | Workflow | `draftroom` | Four parallel specialists and the final writer |
+
+Postgres remains the source of truth. Key Value caches only completed runs for
+five minutes, so live and failed runs are never stale. The cleanup cron runs
+daily at 03:00 UTC and exits as soon as its single delete query completes.
 
 The Vercel AI SDK is used as a Node.js library inside the Workflow. OpenAI is
 the model provider. `OPENAI_API_KEY` belongs only to the Workflow; it is never
@@ -31,7 +37,7 @@ exposed to the browser or Web service.
 ## Prerequisites
 
 - Node.js 22.9 or newer
-- Docker Desktop for local Postgres
+- Docker Desktop for local Postgres and Valkey
 - Render CLI 2.11 or newer
 - An OpenAI API key
 - A Render account for deployed runs
@@ -49,14 +55,14 @@ render whoami
 
 Use the button for a hosted setup, or continue below to run Draftroom locally.
 
-### 1. Start Postgres
+### 1. Start Postgres and Valkey
 
-The Compose service uses Postgres 16 and binds only to
-`127.0.0.1:5433`. Port `5433` avoids colliding with another local Postgres on
-the usual `5432` port.
+Compose runs Postgres 16 on `127.0.0.1:5433` and Valkey 8 on
+`127.0.0.1:6380`. Both bind only to localhost. The alternate ports avoid
+colliding with existing Postgres or Redis-compatible services.
 
 ```bash
-docker compose up -d postgres
+docker compose up -d postgres cache
 docker compose ps
 ```
 
@@ -77,6 +83,7 @@ Both `.env.local` files are ignored by Git.
 
 ```env
 DATABASE_URL=postgres://draftroom:draftroom@127.0.0.1:5433/draftroom
+REDIS_URL=redis://127.0.0.1:6380
 RENDER_API_KEY=local
 RENDER_USE_LOCAL_DEV=true
 WORKFLOW_SLUG=draftroom
@@ -154,6 +161,7 @@ It should list `writeYouTubeScript`, `runScriptSpecialist`, and
 | Variable | Required | Local value | Render value | Purpose |
 | --- | --- | --- | --- | --- |
 | `DATABASE_URL` | Yes | Docker URL on port `5433` | Injected from `scout-db` by `render.yaml` | Postgres connection |
+| `REDIS_URL` | No | Valkey URL on port `6380` | Injected from `draftroom-cache` | Caches completed runs for five minutes |
 | `RENDER_API_KEY` | Yes | `local` | Secret Render API key | Lets the Web service start Workflow tasks |
 | `RENDER_USE_LOCAL_DEV` | Local only | `true` | Leave unset | Routes the SDK to the local task server |
 | `WORKFLOW_SLUG` | No | `draftroom` | `draftroom` | Prefix for `draftroom/writeYouTubeScript` |
@@ -182,12 +190,13 @@ limit in the OpenAI dashboard as the final billing safeguard.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://dashboard.render.com/blueprint/new?repo=https://github.com/sonnysangha/render-scout)
 
-The Blueprint deploys `scout-web` and `scout-db`. Then create the `draftroom`
-Workflow using step 2 below.
+The Blueprint deploys `scout-web`, `scout-db`, `draftroom-cache`, and
+`draftroom-cleanup`. Then create the `draftroom` Workflow using step 2 below.
 
-### 1. Web service and Postgres
+### 1. Web, Postgres, Key Value, and cron
 
-The Blueprint defines `scout-web` and `scout-db`:
+The Blueprint defines the Web service, Postgres, the internal-only Key Value
+cache, and the daily cleanup cron:
 
 ```bash
 render blueprints validate
@@ -195,7 +204,12 @@ render blueprints validate
 
 Connect the repository as a Blueprint in the Render Dashboard. The Blueprint
 automatically injects the database's internal connection string into
-`scout-web` as `DATABASE_URL`.
+`scout-web` as `DATABASE_URL` and the cache's internal connection string as
+`REDIS_URL`.
+
+The free Key Value plan is non-persistent by design because every cached value
+can be recreated from Postgres. Render cron jobs have a $1 monthly minimum;
+viewer credits from step 2 at the top cover that demo resource.
 
 Set these secrets on `scout-web` under **Environment**:
 
@@ -250,10 +264,10 @@ The endpoint should return `ok`.
 
 ## Stopping local services
 
-Stop Postgres while keeping its named volume and data:
+Stop Postgres and Valkey while keeping the Postgres volume and data:
 
 ```bash
-docker compose stop postgres
+docker compose stop postgres cache
 ```
 
 `docker compose down` removes the container and network but keeps the database

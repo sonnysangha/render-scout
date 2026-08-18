@@ -33,9 +33,7 @@ const fetchPost = task(
 
 const fetchComments = task(
   { name: "fetchAllComments", retry },
-  async function fetchComments(
-    postId: string,
-  ): Promise<CommentFetchResult> {
+  async function fetchComments(postId: string): Promise<CommentFetchResult> {
     return fetchAllComments(postId);
   },
 );
@@ -111,12 +109,12 @@ task(
         (useTreeFallback && treeFallback
           ? treeFallback.comments
           : flatComments);
-      const sourceComplete = useTreeFallback && treeFallback
-        ? treeFallback.complete
-        : (fetched?.complete ?? loaded.commentsComplete ?? false);
+      const sourceComplete =
+        useTreeFallback && treeFallback
+          ? treeFallback.complete
+          : (fetched?.complete ?? loaded.commentsComplete ?? false);
       const commentsComplete =
-        sourceComplete &&
-        comments.every((comment) => comment.depthKnown);
+        sourceComplete && comments.every((comment) => comment.depthKnown);
       const [highlights, room, topComments] = await Promise.all([
         rankThread(comments),
         mapThreadRoom(loaded.post, comments),

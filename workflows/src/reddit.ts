@@ -22,7 +22,9 @@ export type RedditComment = {
   author: string;
   body: string;
   score: number;
+  scoreKnown: boolean;
   depth: number;
+  depthKnown: boolean;
   parentId: string;
   directReplies: number;
   descendants: number;
@@ -36,6 +38,18 @@ export type RedditComment = {
 export type RedditThread = {
   post: RedditPost;
   comments: RedditComment[];
+  commentsComplete: boolean;
+};
+
+export type CommentFetchResult = {
+  rows: Record<string, unknown>[];
+  complete: boolean;
+  truncated: boolean;
+};
+
+export type CommentTreeResult = {
+  comments: RedditComment[];
+  complete: boolean;
 };
 
 const USER_AGENT = "web:render-scout:1.0 (by /u/render-scout-demo)";
@@ -74,9 +88,9 @@ function asUnix(value: unknown): number {
   return 0;
 }
 
-const MAX_COMMENTS = 8000;
-const MAX_PAGES = 12;
 const PAGE_FULL = 100;
+const MAX_COMMENTS = 8000;
+const MAX_PAGES = Math.ceil(MAX_COMMENTS / PAGE_FULL) + 2;
 
 export function isRedditPostUrl(input: string): boolean {
   try {
@@ -189,25 +203,54 @@ function commentFromData(
   data: Record<string, unknown>,
   depth: number,
   op: string,
-  extras: { directReplies: number; descendants: number },
+  extras: {
+    directReplies: number;
+    descendants: number;
+    depthKnown?: boolean;
+  },
 ): RedditComment {
   const id = asString(data.id).replace(/^t1_/, "");
   const permalink = asString(data.permalink);
+  const author = asString(data.author);
   return {
     id,
-    author: asString(data.author),
+    author,
     body: asString(data.body),
     score: asNumber(data.score),
+    scoreKnown:
+      typeof data.score === "number" &&
+      Number.isFinite(data.score) &&
+      !asBoolean(data.score_hidden),
     depth,
+    depthKnown: extras.depthKnown ?? true,
     parentId: asString(data.parent_id),
     directReplies: extras.directReplies,
     descendants: extras.descendants,
-    awards: asNumber(data.total_awards_received) + asNumber(data.gilded),
+    awards: awardCount(data),
     controversiality: asNumber(data.controversiality),
-    isOp: asString(data.author) === op || asBoolean(data.is_submitter),
+    isOp:
+      author.toLowerCase() === op.toLowerCase() || asBoolean(data.is_submitter),
     createdUtc: asUnix(data.created_utc),
     permalink: permalink || "",
   };
+}
+
+function awardCount(data: Record<string, unknown>): number {
+  const total = asNumber(data.total_awards_received, -1);
+  if (total >= 0) {
+    return total;
+  }
+
+  if (Array.isArray(data.all_awardings)) {
+    return data.all_awardings.reduce((sum, award) => {
+      if (!isRecord(award)) {
+        return sum;
+      }
+      return sum + Math.max(1, asNumber(award.count, 1));
+    }, 0);
+  }
+
+  return Math.max(0, asNumber(data.gilded));
 }
 
 function walkComments(
@@ -228,7 +271,7 @@ function walkComments(
       : isRecord(replyListing)
         ? listingChildren(replyListing)
         : [];
-    const descendants = walkComments(children, depth + 1, op, out);
+    const descendants: number = walkComments(children, depth + 1, op, out);
     out.push(
       commentFromData(data, depth, op, {
         directReplies: children.filter(
@@ -258,54 +301,194 @@ async function readJson(url: string, timeoutMs = 20000): Promise<unknown> {
 }
 
 function commentsFromFlat(rows: unknown[], post: RedditPost): RedditComment[] {
-  const raw = rows.filter(isRecord);
-  const children = new Map<string, Record<string, unknown>[]>();
-  for (const row of raw) {
-    const parentId = asString(row.parent_id);
-    const list = children.get(parentId) ?? [];
-    list.push(row);
-    children.set(parentId, list);
-  }
+  const postFullname = `t3_${post.id.toLowerCase()}`;
+  const byFullname = new Map<string, Record<string, unknown>>();
 
-  const out: RedditComment[] = [];
-  function walk(parentId: string, depth: number): number {
-    const nodes = children.get(parentId) ?? [];
-    let count = 0;
-    for (const data of nodes) {
-      const id = asString(data.id).replace(/^t1_/, "");
-      const descendants = walk(`t1_${id}`, depth + 1);
-      out.push(
-        commentFromData(data, depth, post.author, {
-          directReplies: (children.get(`t1_${id}`) ?? []).length,
-          descendants,
-        }),
-      );
-      if (!asString(data.permalink)) {
-        const last = out[out.length - 1];
-        if (last) {
-          last.permalink = `${post.permalink}${id}`;
-        }
-      }
-      count += 1 + descendants;
-    }
-    return count;
-  }
-  walk(`t3_${post.id}`, 0);
-  const seen = new Set(out.map((comment) => comment.id));
-  for (const data of raw) {
-    const id = asString(data.id).replace(/^t1_/, "");
-    if (!id || seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
-    out.push(
-      commentFromData(data, 1, post.author, {
-        directReplies: (children.get(`t1_${id}`) ?? []).length,
-        descendants: 0,
-      }),
+  function snapshotTime(row: Record<string, unknown>): number {
+    const meta = isRecord(row._meta) ? row._meta : {};
+    return Math.max(
+      asUnix(row.retrieved_on),
+      asUnix(row.retrieved_utc),
+      asUnix(meta.retrieved_on),
+      asUnix(meta.retrieved_2nd_on),
     );
   }
-  return out;
+
+  function shouldReplace(
+    current: Record<string, unknown>,
+    candidate: Record<string, unknown>,
+  ): boolean {
+    const snapshotDifference = snapshotTime(candidate) - snapshotTime(current);
+    if (snapshotDifference !== 0) {
+      return snapshotDifference > 0;
+    }
+    const candidateQuality =
+      Number(typeof candidate.score === "number") * 100000 +
+      asString(candidate.body).length * 10 +
+      asString(candidate.permalink).length;
+    const currentQuality =
+      Number(typeof current.score === "number") * 100000 +
+      asString(current.body).length * 10 +
+      asString(current.permalink).length;
+    return candidateQuality > currentQuality;
+  }
+
+  for (const row of rows.filter(isRecord)) {
+    const id = asString(row.id).replace(/^t1_/, "");
+    if (id) {
+      const fullname = `t1_${id}`;
+      const current = byFullname.get(fullname);
+      if (!current || shouldReplace(current, row)) {
+        byFullname.set(fullname, row);
+      }
+    }
+  }
+
+  function parentFullname(row: Record<string, unknown>): string | null {
+    const raw = asString(row.parent_id).trim().toLowerCase();
+    if (!raw) {
+      return null;
+    }
+    if (/^t[13]_/i.test(raw)) {
+      return raw;
+    }
+    if (raw === post.id.toLowerCase()) {
+      return postFullname;
+    }
+    return `t1_${raw}`;
+  }
+
+  const children = new Map<string, string[]>();
+  for (const [fullname, row] of byFullname) {
+    const parent = parentFullname(row);
+    if (!parent) {
+      continue;
+    }
+    const siblings = children.get(parent) ?? [];
+    siblings.push(fullname);
+    children.set(parent, siblings);
+  }
+
+  const compareRows = (left: string, right: string): number => {
+    const leftRow = byFullname.get(left);
+    const rightRow = byFullname.get(right);
+    const timeDifference =
+      asUnix(leftRow?.created_utc) - asUnix(rightRow?.created_utc);
+    return timeDifference || left.localeCompare(right);
+  };
+  for (const siblings of children.values()) {
+    siblings.sort(compareRows);
+  }
+
+  const descendantsById = new Map<string, number>();
+  function countDescendants(fullname: string, trail = new Set<string>()): number {
+    const cached = descendantsById.get(fullname);
+    if (cached !== undefined) {
+      return cached;
+    }
+    if (trail.has(fullname)) {
+      return 0;
+    }
+
+    const nextTrail = new Set(trail);
+    nextTrail.add(fullname);
+    const total = (children.get(fullname) ?? []).reduce(
+      (sum, child) =>
+        nextTrail.has(child)
+          ? sum
+          : sum + 1 + countDescendants(child, nextTrail),
+      0,
+    );
+    descendantsById.set(fullname, total);
+    return total;
+  }
+
+  const depthById = new Map<string, number>();
+  function depthOf(fullname: string, trail = new Set<string>()): number {
+    const cached = depthById.get(fullname);
+    if (cached !== undefined) {
+      return cached;
+    }
+    if (trail.has(fullname)) {
+      return 0;
+    }
+
+    const row = byFullname.get(fullname);
+    if (!row) {
+      return 0;
+    }
+    const parent = parentFullname(row);
+    if (!parent) {
+      depthById.set(fullname, 0);
+      return 0;
+    }
+    if (parent === postFullname) {
+      depthById.set(fullname, 0);
+      return 0;
+    }
+
+    const nextTrail = new Set(trail);
+    nextTrail.add(fullname);
+    const depth = byFullname.has(parent) ? depthOf(parent, nextTrail) + 1 : 1;
+    depthById.set(fullname, depth);
+    return depth;
+  }
+
+  const depthKnownById = new Map<string, boolean>();
+  function depthKnownOf(
+    fullname: string,
+    trail = new Set<string>(),
+  ): boolean {
+    const cached = depthKnownById.get(fullname);
+    if (cached !== undefined) {
+      return cached;
+    }
+    if (trail.has(fullname)) {
+      return false;
+    }
+
+    const row = byFullname.get(fullname);
+    if (!row) {
+      return false;
+    }
+    const parent = parentFullname(row);
+    if (!parent) {
+      depthKnownById.set(fullname, false);
+      return false;
+    }
+    if (parent === postFullname) {
+      depthKnownById.set(fullname, true);
+      return true;
+    }
+    if (!byFullname.has(parent)) {
+      depthKnownById.set(fullname, false);
+      return false;
+    }
+
+    const nextTrail = new Set(trail);
+    nextTrail.add(fullname);
+    const known = depthKnownOf(parent, nextTrail);
+    depthKnownById.set(fullname, known);
+    return known;
+  }
+
+  const permalinkBase = post.permalink.endsWith("/")
+    ? post.permalink
+    : `${post.permalink}/`;
+  return [...byFullname.entries()]
+    .sort(([left], [right]) => compareRows(left, right))
+    .map(([fullname, data]) => {
+      const id = fullname.slice(3);
+      const comment = commentFromData(data, depthOf(fullname), post.author, {
+        directReplies: (children.get(fullname) ?? []).length,
+        descendants: countDescendants(fullname),
+        depthKnown: depthKnownOf(fullname),
+      });
+      if (!comment.permalink) {
+        comment.permalink = `${permalinkBase}${id}/`;
+      }
+      return comment;
+    });
 }
 
 async function searchCommentPage(
@@ -328,9 +511,10 @@ async function searchCommentPage(
         `${ARCHIVE}/comments/search?${params.toString()}`,
         40000,
       );
-      return isRecord(payload) && Array.isArray(payload.data)
-        ? payload.data.filter(isRecord)
-        : [];
+      if (!isRecord(payload) || !Array.isArray(payload.data)) {
+        throw new Error("Unexpected comment search payload");
+      }
+      return payload.data.filter(isRecord);
     } catch (error) {
       lastError = error instanceof Error ? error : lastError;
       await delay(800 * (attempt + 1));
@@ -341,7 +525,11 @@ async function searchCommentPage(
 
 export async function fetchAllComments(
   postId: string,
-): Promise<Record<string, unknown>[]> {
+  loadPage: (
+    postId: string,
+    after: number | null,
+  ) => Promise<Record<string, unknown>[]> = searchCommentPage,
+): Promise<CommentFetchResult> {
   const collected: Record<string, unknown>[] = [];
   const seen = new Set<string>();
   let after: number | null = null;
@@ -349,19 +537,20 @@ export async function fetchAllComments(
   for (let page = 0; page < MAX_PAGES; page += 1) {
     let rows: Record<string, unknown>[];
     try {
-      rows = await searchCommentPage(postId, after);
+      rows = await loadPage(postId, after);
     } catch (error) {
-      if (collected.length > 0) {
-        return collected;
-      }
       throw error;
     }
 
     if (rows.length === 0) {
-      break;
+      return {
+        rows: collected,
+        complete: collected.length > 0,
+        truncated: false,
+      };
     }
 
-    let newest = after ?? 0;
+    let newest: number = after ?? 0;
     let added = 0;
     for (const row of rows) {
       const id = asString(row.id).replace(/^t1_/, "");
@@ -375,33 +564,39 @@ export async function fetchAllComments(
     }
 
     if (added === 0) {
-      after = (after ?? newest) + 1;
-      continue;
+      const stalledAtFullBoundary = rows.length >= PAGE_FULL;
+      return {
+        rows: collected,
+        complete: !stalledAtFullBoundary,
+        truncated: stalledAtFullBoundary,
+      };
     }
 
     if (collected.length >= MAX_COMMENTS || rows.length < PAGE_FULL) {
-      return collected.slice(0, MAX_COMMENTS);
+      const truncated = collected.length >= MAX_COMMENTS;
+      return {
+        rows: collected.slice(0, MAX_COMMENTS),
+        complete: !truncated,
+        truncated,
+      };
     }
 
-    after = newest;
-    await delay(400);
+    // Overlap one second so comments sharing the page-boundary timestamp are
+    // not dropped by APIs that interpret `after` as an exclusive cursor.
+    after = Math.max(0, newest - 1);
+    if (loadPage === searchCommentPage) {
+      await delay(400);
+    }
   }
 
-  return collected;
+  return { rows: collected, complete: false, truncated: true };
 }
 
 export function commentsFromRows(
   post: RedditPost,
   rows: Record<string, unknown>[],
 ): RedditComment[] {
-  const unique = new Map<string, Record<string, unknown>>();
-  for (const row of rows) {
-    const id = asString(row.id).replace(/^t1_/, "");
-    if (id) {
-      unique.set(id, row);
-    }
-  }
-  return commentsFromFlat([...unique.values()].slice(0, MAX_COMMENTS), post);
+  return commentsFromFlat(rows.slice(0, MAX_COMMENTS), post);
 }
 
 async function fetchPostFromArchive(postId: string): Promise<RedditPost> {
@@ -422,6 +617,7 @@ async function fetchPostFromArchive(postId: string): Promise<RedditPost> {
 export async function loadRedditPost(input: string): Promise<{
   post: RedditPost;
   liveComments: RedditComment[] | null;
+  commentsComplete: boolean | null;
 }> {
   if (!isRedditPostUrl(input)) {
     throw new Error("Paste a Reddit post URL");
@@ -437,34 +633,83 @@ export async function loadRedditPost(input: string): Promise<{
     return {
       post: await fetchPostFromArchive(postId),
       liveComments: null,
+      commentsComplete: null,
     };
   } catch {
     const live = await fetchFromReddit(path);
-    return { post: live.post, liveComments: live.comments };
+    return {
+      post: live.post,
+      liveComments: live.comments,
+      commentsComplete: live.commentsComplete,
+    };
   }
 }
 
-async function fetchCollapsedTree(post: RedditPost): Promise<RedditComment[]> {
-  const treePayload = await readJson(
-    `${ARCHIVE}/comments/tree?link_id=t3_${post.id}`,
-  );
-  const nodes =
-    isRecord(treePayload) && Array.isArray(treePayload.data)
-      ? treePayload.data
-      : [];
+function containsMore(nodes: unknown[]): boolean {
+  for (const node of nodes) {
+    if (!isRecord(node)) {
+      continue;
+    }
+    if (node.kind === "more") {
+      return true;
+    }
+    if (node.kind !== "t1" || !isRecord(node.data)) {
+      continue;
+    }
+    const replies = node.data.replies;
+    const children = Array.isArray(replies)
+      ? replies
+      : isRecord(replies)
+        ? listingChildren(replies)
+        : [];
+    if (containsMore(children)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export async function fetchArchiveCommentTree(
+  post: RedditPost,
+): Promise<CommentTreeResult> {
+  const params = new URLSearchParams({
+    link_id: `t3_${post.id}`,
+    limit: String(MAX_COMMENTS),
+    start_breadth: String(MAX_COMMENTS),
+    start_depth: String(MAX_COMMENTS),
+  });
+  const treePayload = await readJson(`${ARCHIVE}/comments/tree?${params}`);
+  if (!isRecord(treePayload) || !Array.isArray(treePayload.data)) {
+    throw new Error("Unexpected comment tree payload");
+  }
+  const nodes = treePayload.data;
   const comments: RedditComment[] = [];
   walkComments(nodes, 0, post.author, comments);
-  return comments;
+  return {
+    comments,
+    complete:
+      !containsMore(nodes) && (comments.length > 0 || post.numComments === 0),
+  };
 }
 
 async function fetchFromArchive(postId: string): Promise<RedditThread> {
   const post = await fetchPostFromArchive(postId);
-  const rows = await fetchAllComments(post.id);
-  const comments = commentsFromRows(post, rows);
+  const fetched = await fetchAllComments(post.id);
+  const comments = commentsFromRows(post, fetched.rows);
   if (comments.length > 0) {
-    return { post, comments };
+    return {
+      post,
+      comments,
+      commentsComplete:
+        fetched.complete && comments.every((comment) => comment.depthKnown),
+    };
   }
-  return { post, comments: await fetchCollapsedTree(post) };
+  const collapsed = await fetchArchiveCommentTree(post);
+  return {
+    post,
+    comments: collapsed.comments,
+    commentsComplete: collapsed.complete,
+  };
 }
 
 async function fetchFromReddit(path: string): Promise<RedditThread> {
@@ -483,8 +728,9 @@ async function fetchFromReddit(path: string): Promise<RedditThread> {
       }
       const post = parsePostListing(payload[0]);
       const comments: RedditComment[] = [];
-      walkComments(listingChildren(payload[1]), 0, post.author, comments);
-      return { post, comments };
+      const nodes = listingChildren(payload[1]);
+      walkComments(nodes, 0, post.author, comments);
+      return { post, comments, commentsComplete: !containsMore(nodes) };
     } catch (error) {
       lastError = error instanceof Error ? error.message : lastError;
     }

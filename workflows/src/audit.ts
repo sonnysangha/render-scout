@@ -10,7 +10,10 @@ import {
 import {
   commentsFromRows,
   fetchAllComments,
+  fetchArchiveCommentTree,
   loadRedditPost,
+  type CommentFetchResult,
+  type CommentTreeResult,
   type RedditComment,
   type RedditPost,
 } from "./reddit.js";
@@ -32,8 +35,17 @@ const fetchComments = task(
   { name: "fetchAllComments", retry },
   async function fetchComments(
     postId: string,
-  ): Promise<Record<string, unknown>[]> {
+  ): Promise<CommentFetchResult> {
     return fetchAllComments(postId);
+  },
+);
+
+const fetchCommentTree = task(
+  { name: "fetchCommentTree", retry },
+  async function fetchCommentTree(
+    post: RedditPost,
+  ): Promise<CommentTreeResult> {
+    return fetchArchiveCommentTree(post);
   },
 );
 
@@ -78,12 +90,33 @@ task(
     try {
       await setAudit(auditId, { status: "running" });
       const loaded = await fetchPost(url);
-      const rows =
+      const fetched =
         loaded.liveComments === null
           ? await fetchComments(loaded.post.id)
-          : [];
+          : null;
+      const flatComments = fetched
+        ? commentsFromRows(loaded.post, fetched.rows)
+        : [];
+      const treeFallback =
+        fetched && !fetched.complete
+          ? await fetchCommentTree(loaded.post)
+          : null;
+      const useTreeFallback =
+        treeFallback !== null &&
+        (treeFallback.comments.length > flatComments.length ||
+          (treeFallback.complete &&
+            treeFallback.comments.length === flatComments.length));
       const comments =
-        loaded.liveComments ?? commentsFromRows(loaded.post, rows);
+        loaded.liveComments ??
+        (useTreeFallback && treeFallback
+          ? treeFallback.comments
+          : flatComments);
+      const sourceComplete = useTreeFallback && treeFallback
+        ? treeFallback.complete
+        : (fetched?.complete ?? loaded.commentsComplete ?? false);
+      const commentsComplete =
+        sourceComplete &&
+        comments.every((comment) => comment.depthKnown);
       const [highlights, room, topComments] = await Promise.all([
         rankThread(comments),
         mapThreadRoom(loaded.post, comments),
@@ -91,8 +124,14 @@ task(
       ]);
       const report: RedditReport = {
         kind: "reddit",
+        version: 2,
+        generatedAt: new Date().toISOString(),
         post: loaded.post,
-        sample: summarizeSample(comments, loaded.post.numComments),
+        sample: summarizeSample(
+          comments,
+          loaded.post.numComments,
+          commentsComplete,
+        ),
         highlights,
         topComments,
         room,

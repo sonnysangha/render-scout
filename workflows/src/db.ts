@@ -1,8 +1,6 @@
 import { Pool } from "pg";
-import { Redis } from "ioredis";
 
 let pool: Pool | undefined;
-let redis: Redis | undefined;
 
 function getPool(): Pool {
   if (!pool) {
@@ -15,38 +13,49 @@ function getPool(): Pool {
   return pool;
 }
 
-function getRedis(): Redis {
-  if (!redis) {
-    const redisUrl = process.env.REDIS_URL;
-    if (!redisUrl) {
-      throw new Error("REDIS_URL is not set");
-    }
-    redis = new Redis(redisUrl);
-  }
-  return redis;
+export type Specialist = "research" | "hooks" | "outline" | "audience";
+
+export async function setRunStatus(
+  id: number,
+  status: "running" | "synthesizing",
+): Promise<void> {
+  await getPool().query(
+    `UPDATE script_runs SET status = $2, updated_at = NOW() WHERE id = $1`,
+    [id, status],
+  );
 }
 
-export async function setAudit(
+export async function saveSpecialistOutput(
   id: number,
-  fields: { status: string; report?: unknown },
+  specialist: Specialist,
+  output: string,
 ): Promise<void> {
-  if (fields.report !== undefined) {
-    await getPool().query(
-      `UPDATE audits SET status = $2, report = $3 WHERE id = $1`,
-      [id, fields.status, JSON.stringify(fields.report)],
-    );
-  } else {
-    await getPool().query(`UPDATE audits SET status = $2 WHERE id = $1`, [
-      id,
-      fields.status,
-    ]);
-  }
-
-  const { rows } = await getPool().query(
-    `SELECT id, url, status, report, created_at FROM audits WHERE id = $1`,
-    [id],
+  const column = {
+    research: "research",
+    hooks: "hooks",
+    outline: "outline",
+    audience: "audience",
+  }[specialist];
+  await getPool().query(
+    `UPDATE script_runs SET ${column} = $2, updated_at = NOW() WHERE id = $1`,
+    [id, output],
   );
-  if (rows[0]) {
-    await getRedis().set(`audit:${id}`, JSON.stringify(rows[0]));
-  }
+}
+
+export async function completeRun(id: number, script: string): Promise<void> {
+  await getPool().query(
+    `UPDATE script_runs
+     SET status = 'done', final_script = $2, error = NULL, updated_at = NOW()
+     WHERE id = $1`,
+    [id, script],
+  );
+}
+
+export async function failRun(id: number, message: string): Promise<void> {
+  await getPool().query(
+    `UPDATE script_runs
+     SET status = 'failed', error = $2, updated_at = NOW()
+     WHERE id = $1`,
+    [id, message],
+  );
 }

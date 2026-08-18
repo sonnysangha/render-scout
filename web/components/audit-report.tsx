@@ -35,30 +35,56 @@ function CommentCopy({ body }: { body: string }) {
 }
 
 function CommentBlock({
-  label,
+  labels,
   comment,
   index,
+  isV2,
 }: {
-  label: string;
+  labels: string[];
   comment: CommentCard;
   index: number;
+  isV2: boolean;
 }) {
   return (
     <article className="comment-card">
       <header className="comment-card__header">
         <div>
-          <p className="eyebrow">Standout signal</p>
-          <h4>{label}</h4>
+          <p className="eyebrow">
+            {isV2
+              ? labels.length > 1
+                ? "Standout signals"
+                : "Standout signal"
+              : labels.length > 1
+                ? "Saved signals"
+                : "Saved signal"}
+          </p>
+          <h4>{labels.join(" · ")}</h4>
         </div>
         <span className="signal-index" aria-hidden="true">
           {String(index + 1).padStart(2, "0")}
         </span>
       </header>
       <p className="meta comment-meta">
-        <span className="score-pill">↑ {formatScore(comment.score)}</span>
+        {comment.scoreKnown === false ? null : (
+          <span className="score-pill">↑ {formatScore(comment.score)}</span>
+        )}
         <span>u/{comment.author}</span>
         {comment.isOp ? <span className="op">OP</span> : null}
-        {comment.replies > 0 ? <span>{comment.replies} replies</span> : null}
+        {comment.wordCount !== undefined ? (
+          <span>{comment.wordCount} words</span>
+        ) : null}
+        {isV2 && comment.replies > 0 ? (
+          <span>{comment.replies} total replies</span>
+        ) : null}
+        {isV2 &&
+        comment.directReplies !== undefined &&
+        comment.directReplies > 0 &&
+        comment.directReplies !== comment.replies ? (
+          <span>{comment.directReplies} direct</span>
+        ) : null}
+        {!isV2 && comment.replies > 0 ? (
+          <span>{comment.replies} direct replies</span>
+        ) : null}
         {comment.awards > 0 ? <span>{comment.awards} awards</span> : null}
       </p>
       <CommentCopy body={comment.body} />
@@ -78,35 +104,60 @@ function CommentBlock({
 
 export function AuditReport({ report }: { report: RedditReport }) {
   const { post, sample, highlights, topComments, room } = report;
+  const isV2 = report.version === 2;
+  const hasAnalyzedCount = sample.commentsAnalyzed !== undefined;
+  const analyzed = sample.commentsAnalyzed ?? sample.commentsLoaded;
   const listed = sample.commentsListed ?? post.numComments;
-  const complete =
-    sample.complete ?? (listed === 0 || sample.commentsLoaded >= listed * 0.9);
+  const complete = isV2 ? (sample.complete ?? false) : false;
   const showListedTotal = listed > sample.commentsLoaded;
-  const cardCandidates: Array<[string, CommentCard | null]> = [
-    ["Most upvoted", highlights.mostUpvoted],
-    ["Started the biggest reply pile", highlights.mostReplied],
-    ["Punchiest take", highlights.punchiest],
-    ["Hidden gem", highlights.hiddenGem],
-    ["Longest comment", highlights.longest],
-    ["Most awarded", highlights.mostAwarded],
-    ["Best OP reply", highlights.bestOpReply],
-  ];
-  const cards = cardCandidates.filter(
-    (card): card is [string, CommentCard] => card[1] !== null,
-  );
-  const scoreTotal = Math.max(
-    1,
-    room.scoreSplit.positive + room.scoreSplit.zero + room.scoreSplit.negative,
-  );
+  const coverageSummary = hasAnalyzedCount
+    ? `${sample.commentsLoaded} records fetched; ${analyzed} responses were eligible after filtering bots and tombstones.`
+    : `${sample.commentsLoaded} records are stored in this earlier report.`;
+  const cardCandidates: Array<[string, CommentCard | null]> = isV2
+    ? [
+        ["Highest score", highlights.mostUpvoted],
+        ["Biggest reply pile", highlights.mostReplied],
+        ["Top short comment", highlights.punchiest],
+        ["Best beyond the top five", highlights.hiddenGem],
+        ["Longest readable comment", highlights.longest],
+        ["Most awarded", highlights.mostAwarded],
+        ["Top OP reply", highlights.bestOpReply],
+      ]
+    : [
+        ["Most upvoted", highlights.mostUpvoted],
+        ["Started biggest reply pile", highlights.mostReplied],
+        ["Punchiest take", highlights.punchiest],
+        ["Hidden gem", highlights.hiddenGem],
+        ["Longest comment", highlights.longest],
+        ["Most awarded", highlights.mostAwarded],
+        ["Best OP reply", highlights.bestOpReply],
+      ];
+  const cards = cardCandidates
+    .filter((card): card is [string, CommentCard] => card[1] !== null)
+    .reduce<Array<{ labels: string[]; comment: CommentCard }>>(
+      (groups, [label, comment]) => {
+        const existing = groups.find((group) => group.comment.id === comment.id);
+        if (existing) {
+          existing.labels.push(label);
+        } else {
+          groups.push({ labels: [label], comment });
+        }
+        return groups;
+      },
+      [],
+    );
+  const scoreTotal =
+    room.scoreSplit.positive + room.scoreSplit.zero + room.scoreSplit.negative;
+  const scoreDenominator = Math.max(1, scoreTotal);
   const scoreRows = [
     {
-      label: "Positive",
+      label: "Above zero",
       value: room.scoreSplit.positive,
       className: "is-positive",
     },
-    { label: "Neutral", value: room.scoreSplit.zero, className: "is-neutral" },
+    { label: "Zero", value: room.scoreSplit.zero, className: "is-neutral" },
     {
-      label: "Negative",
+      label: "Below zero",
       value: room.scoreSplit.negative,
       className: "is-negative",
     },
@@ -117,6 +168,20 @@ export function AuditReport({ report }: { report: RedditReport }) {
     year: "numeric",
     timeZone: "UTC",
   }).format(new Date(post.createdUtc * 1000));
+  const analyzedTimestamp = report.generatedAt
+    ? Date.parse(report.generatedAt)
+    : Number.NaN;
+  const analyzedDate = Number.isNaN(analyzedTimestamp)
+    ? null
+    : new Intl.DateTimeFormat("en", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "UTC",
+        timeZoneName: "short",
+      }).format(new Date(analyzedTimestamp));
 
   return (
     <section className="report" aria-label="Reddit thread analysis">
@@ -142,6 +207,12 @@ export function AuditReport({ report }: { report: RedditReport }) {
         <h2>{post.title}</h2>
         <p className="post-byline">
           Posted by u/{post.author} <span aria-hidden="true">·</span> {postDate}
+          {analyzedDate ? (
+            <>
+              {" "}
+              <span aria-hidden="true">·</span> Analyzed {analyzedDate}
+            </>
+          ) : null}
         </p>
         <div className="post-signal-row" aria-label="Original post statistics">
           <span>
@@ -151,7 +222,7 @@ export function AuditReport({ report }: { report: RedditReport }) {
             <strong>{Math.round(post.upvoteRatio * 100)}%</strong> upvoted
           </span>
           <span>
-            <strong>{formatScore(post.numComments)}</strong> listed replies
+            <strong>{formatScore(post.numComments)}</strong> reported replies
           </span>
         </div>
         {post.selftext ? (
@@ -174,28 +245,34 @@ export function AuditReport({ report }: { report: RedditReport }) {
         </div>
         <div className="snapshot-grid">
           <div className="metric">
-            <strong>{sample.commentsLoaded}</strong>
-            <span>Responses analyzed</span>
+            <strong>{analyzed}</strong>
+            <span>
+              {hasAnalyzedCount
+                ? "Eligible responses analyzed"
+                : "Responses in saved report"}
+            </span>
           </div>
           <div className="metric">
-            <strong>{sample.uniqueCommenters}</strong>
-            <span>Contributors</span>
+            <strong>{isV2 ? sample.uniqueCommenters : "—"}</strong>
+            <span>{isV2 ? "Contributors" : "Contributor signal unavailable"}</span>
           </div>
           <div className="metric">
-            <strong>{room.questionCount}</strong>
-            <span>Questions</span>
+            <strong>{isV2 ? room.questionCount : "—"}</strong>
+            <span>
+              {isV2 ? "Comments with questions" : "Question signal unavailable"}
+            </span>
           </div>
           <div className="metric">
-            <strong>{sample.opReplies}</strong>
-            <span>OP replies</span>
+            <strong>{isV2 ? sample.opReplies : "—"}</strong>
+            <span>{isV2 ? "OP replies" : "OP signal unavailable"}</span>
           </div>
           <div className="metric">
-            <strong>{sample.maxDepth}</strong>
-            <span>Reply depth</span>
+            <strong>{isV2 ? sample.maxDepth : "—"}</strong>
+            <span>{isV2 ? "Reply depth" : "Depth signal unavailable"}</span>
           </div>
           <div className="metric">
-            <strong>{sample.medianScore}</strong>
-            <span>Median score</span>
+            <strong>{isV2 ? sample.medianScore : "—"}</strong>
+            <span>{isV2 ? "Median score" : "Score signal unavailable"}</span>
           </div>
         </div>
         <div className={`coverage-card${complete ? " is-complete" : ""}`}>
@@ -206,10 +283,10 @@ export function AuditReport({ report }: { report: RedditReport }) {
             <strong>{complete ? "Full-thread coverage" : "Sampled coverage"}</strong>
             <p>
               {complete
-                ? `${sample.commentsLoaded} available responses analyzed.`
+                ? coverageSummary
                 : showListedTotal
-                  ? `${sample.commentsLoaded} of ${listed} listed responses analyzed. Rankings use this sample.`
-                  : `${sample.commentsLoaded} available responses analyzed. Rankings use this sample.`}
+                  ? `${sample.commentsLoaded} of ${listed} reported responses were fetched. ${coverageSummary} Rankings use this sample.`
+                  : `${coverageSummary} Rankings use this sample.`}
             </p>
           </div>
         </div>
@@ -218,82 +295,111 @@ export function AuditReport({ report }: { report: RedditReport }) {
       <section className="report-section room-section" aria-labelledby="room-heading">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Room signal</p>
-            <h3 id="room-heading">What the conversation feels like</h3>
+            <p className="eyebrow">
+              {isV2 ? "Room data" : "Saved room analysis"}
+            </p>
+            <h3 id="room-heading">
+              {isV2 ? "What the discussion shows" : "Earlier report summary"}
+            </h3>
           </div>
         </div>
-        <div className="room-card">
-          <div className="room-copy">
-            <p className="room-verdict">{room.verdict}</p>
-            {room.repeatingPhrases.length > 0 ? (
-              <div className="phrases">
-                <span>Repeated phrases</span>
-                <ul>
-                  {room.repeatingPhrases.map((phrase) => (
-                    <li key={phrase}>{phrase}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            <ul className="room-facts">
-              <li>
-                <strong>{room.linkCount}</strong> comments shared links
-              </li>
-              <li>
-                <strong>{room.deletedOrRemoved}</strong> deleted or removed
-              </li>
-              {room.loudestCommenter ? (
-                <li>
-                  <strong>u/{room.loudestCommenter.author}</strong> was the most active
-                </li>
-              ) : null}
-            </ul>
-          </div>
-          <div className="score-distribution">
-            <div className="score-distribution__header">
-              <span>Score distribution</span>
-              <span>{scoreTotal} scored</span>
-            </div>
-            <div className="score-bars">
-              {scoreRows.map((row) => (
-                <div className="score-row" key={row.label}>
-                  <div>
-                    <span>{row.label}</span>
-                    <strong>{row.value}</strong>
-                  </div>
-                  <span className="score-track" aria-hidden="true">
-                    <span
-                      className={row.className}
-                      style={{
-                        width:
-                          row.value === 0
-                            ? 0
-                            : `max(2px, ${(row.value / scoreTotal) * 100}%)`,
-                      }}
-                    />
-                  </span>
+        {isV2 ? (
+          <div className="room-card">
+            <div className="room-copy">
+              <p className="room-verdict">{room.verdict}</p>
+              {room.repeatingPhrases.length > 0 ? (
+                <div className="phrases">
+                  <span>Repeated phrases</span>
+                  <ul>
+                    {room.repeatingPhrases.map((phrase) => (
+                      <li key={phrase}>{phrase}</li>
+                    ))}
+                  </ul>
                 </div>
-              ))}
+              ) : null}
+              <ul className="room-facts">
+                <li>
+                  <strong>{room.linkCount}</strong> comments shared links
+                </li>
+                <li>
+                  <strong>{room.deletedOrRemoved}</strong> deleted or removed
+                </li>
+                {room.loudestCommenter ? (
+                  <li>
+                    <strong>u/{room.loudestCommenter.author}</strong> was the most
+                    active
+                  </li>
+                ) : null}
+              </ul>
+            </div>
+            <div className="score-distribution">
+              <div className="score-distribution__header">
+                <span>Score distribution</span>
+                <span>{scoreTotal} scored</span>
+              </div>
+              <div className="score-bars">
+                {scoreRows.map((row) => (
+                  <div className="score-row" key={row.label}>
+                    <div>
+                      <span>{row.label}</span>
+                      <strong>{row.value}</strong>
+                    </div>
+                    <span className="score-track" aria-hidden="true">
+                      <span
+                        className={row.className}
+                        style={{
+                          width:
+                            row.value === 0
+                              ? 0
+                              : `max(2px, ${(row.value / scoreDenominator) * 100}%)`,
+                        }}
+                      />
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="coverage-card">
+            <span className="coverage-icon" aria-hidden="true">
+              ↗
+            </span>
+            <div>
+              <strong>Re-run this thread for corrected room signals</strong>
+              <p>
+                This saved report used the earlier analysis model, so its phrase,
+                question, link, and score summaries are intentionally hidden.
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="report-section" aria-labelledby="highlights-heading">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Standout replies</p>
-            <h3 id="highlights-heading">Comments that moved the room</h3>
+            <p className="eyebrow">
+              {isV2 ? "Standout replies" : "Saved standouts"}
+            </p>
+            <h3 id="highlights-heading">
+              {isV2 ? "Comments that moved the room" : "Earlier-model highlights"}
+            </h3>
           </div>
-          <p>Ranked by attention, reaction, and conversational impact.</p>
+          <p>
+            {isV2
+              ? "Ranked by factual thread signals."
+              : "Re-run the thread to replace these saved legacy rankings."}
+          </p>
         </div>
         <div className="highlight-grid">
-          {cards.map(([label, comment], index) => (
+          {cards.map(({ labels, comment }, index) => (
             <CommentBlock
-              key={label}
-              label={label}
+              key={comment.id}
+              labels={labels}
               comment={comment}
               index={index}
+              isV2={isV2}
             />
           ))}
         </div>
@@ -303,10 +409,18 @@ export function AuditReport({ report }: { report: RedditReport }) {
         <section className="report-section" aria-labelledby="ranking-heading">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Leaderboard</p>
-              <h3 id="ranking-heading">Top comments by score</h3>
+              <p className="eyebrow">
+                {isV2 ? "Leaderboard" : "Saved leaderboard"}
+              </p>
+              <h3 id="ranking-heading">
+                {isV2 ? "Top comments by score" : "Earlier-model score ranking"}
+              </h3>
             </div>
-            <p>The replies the community lifted to the top.</p>
+            <p>
+              {isV2
+                ? "The replies the community lifted to the top."
+                : "This ranking is saved from the earlier model; re-run the thread to replace it."}
+            </p>
           </div>
           <ol className="top-list">
             {topComments.map((comment, index) => (

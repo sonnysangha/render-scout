@@ -8,9 +8,16 @@ async function main() {
   const pool = getPool();
 
   const { rows } = await pool.query<{ url: string }>(
-    `SELECT DISTINCT ON (url) url
-     FROM audits
-     ORDER BY url, created_at DESC
+    `SELECT url
+     FROM (
+       SELECT DISTINCT ON (COALESCE(report #>> '{post,id}', url))
+         url,
+         created_at
+       FROM audits
+       WHERE status = 'done'
+       ORDER BY COALESCE(report #>> '{post,id}', url), created_at DESC
+     ) AS latest
+     ORDER BY created_at DESC
      LIMIT 5`,
   );
 

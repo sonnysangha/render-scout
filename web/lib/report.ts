@@ -3,15 +3,20 @@ export type CommentCard = {
   author: string;
   body: string;
   score: number;
+  scoreKnown?: boolean;
   depth: number;
   replies: number;
+  directReplies?: number;
   awards: number;
+  wordCount?: number;
   permalink: string;
   isOp: boolean;
 };
 
 export type RedditReport = {
   kind: "reddit";
+  version?: number;
+  generatedAt?: string;
   post: {
     id: string;
     title: string;
@@ -30,6 +35,7 @@ export type RedditReport = {
   };
   sample: {
     commentsLoaded: number;
+    commentsAnalyzed?: number;
     commentsListed?: number;
     complete?: boolean;
     uniqueCommenters: number;

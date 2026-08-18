@@ -10,6 +10,13 @@ projects:
             ipAllowList: []
 
         services:
+          - type: keyvalue
+            name: draftroom-cache
+            plan: free
+            region: oregon
+            maxmemoryPolicy: allkeys-lru
+            ipAllowList: []
+
           - type: web
             name: scout-web
             runtime: node
@@ -27,9 +34,30 @@ projects:
                 fromDatabase:
                   name: scout-db
                   property: connectionString
+              - key: REDIS_URL
+                fromService:
+                  name: draftroom-cache
+                  type: keyvalue
+                  property: connectionString
               - key: WORKFLOW_SLUG
                 value: draftroom
               - key: RENDER_API_KEY
                 sync: false
               - key: RATE_LIMIT_SECRET
                 sync: false
+
+          - type: cron
+            name: draftroom-cleanup
+            runtime: node
+            plan: starter
+            region: oregon
+            rootDir: web
+            schedule: "0 3 * * *"
+            buildCommand: npm ci --include=dev
+            startCommand: npm run cleanup
+            autoDeployTrigger: commit
+            envVars:
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: scout-db
+                  property: connectionString

@@ -144,7 +144,7 @@ export default async function Page({
 
       <footer className="site-footer">
         <span>Draftroom</span>
-        <span>Orchestrated with Render Workflows</span>
+        <span>Workflows · Postgres · Key Value · Cron</span>
       </footer>
     </main>
   );

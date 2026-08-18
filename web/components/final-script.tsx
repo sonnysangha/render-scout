@@ -35,9 +35,11 @@ function parseScript(script: string): ScriptBlock[] {
 export function FinalScript({
   script,
   status,
+  briefsReady,
 }: {
   script: string | null;
   status: RunStatus;
+  briefsReady: boolean;
 }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle",
@@ -57,14 +59,15 @@ export function FinalScript({
     window.setTimeout(() => setCopyState("idle"), 2_000);
   }
 
-  const synthesizing = status === "synthesizing";
   const failed = status === "failed" || (status === "done" && !script);
+  const writing =
+    !failed && !script && (briefsReady || status === "synthesizing");
 
   return (
     <section
-      className={`final-script${script ? " final-script--ready" : ""}`}
+      className={`final-script${script ? " final-script--ready" : ""}${writing ? " final-script--active" : ""}`}
       aria-labelledby="final-script-heading"
-      aria-busy={synthesizing}
+      aria-busy={writing}
     >
       <header className="final-script__header">
         <div>
@@ -80,10 +83,10 @@ export function FinalScript({
                 : "Copy script"}
           </button>
         ) : (
-          <span className={`draft-state${synthesizing ? " is-working" : ""}`}>
+          <span className={`draft-state${writing ? " is-working" : ""}`}>
             {failed
               ? "Not completed"
-              : synthesizing
+              : writing
                 ? "Writing now"
                 : "Waiting for briefs"}
           </span>
@@ -106,7 +109,7 @@ export function FinalScript({
           <p>
             {failed
               ? "The workflow stopped before the final draft was ready. Your completed briefs are still shown above."
-              : synthesizing
+              : writing
                 ? "The lead writer is combining the strongest research, hook, structure, and audience direction."
                 : "The lead writer starts once the specialist briefs are ready."}
           </p>
